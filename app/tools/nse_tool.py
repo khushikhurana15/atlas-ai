@@ -32,6 +32,7 @@ def _get_from_nse_library(symbol: str) -> dict:
         "previous_close": meta.get("previousClose"),
         "change": meta.get("change"),
         "percent_change": meta.get("pChange"),
+        "currency": "INR",
     }
 
 
@@ -53,6 +54,7 @@ def _get_from_yfinance(symbol: str) -> dict:
         "previous_close": round(previous_close, 2),
         "change": round(change, 2),
         "percent_change": round(percent_change, 2),
+        "currency": "INR",
     }
 
 

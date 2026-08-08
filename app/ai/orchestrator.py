@@ -218,6 +218,9 @@ Rules:
 - You're given recent conversation history - use it for context.
 - Formatting: Telegram Markdown only - single asterisk *bold* (not **),
   underscore _italic_. No tables - use bullet points (- or •).
+- CURRENCY: Every price tool result includes a "currency" field (USD or
+  INR). Always show the matching symbol - $ for USD, ₹ for INR. Never
+  default to ₹ for a US stock or $ for an Indian stock.
 """
 
 

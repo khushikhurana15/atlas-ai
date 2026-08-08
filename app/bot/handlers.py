@@ -73,8 +73,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, user_message: str):
     db = get_db_session()
     telegram_id = str(update.effective_user.id)
+    reply = "Sorry, something went wrong on my end. Please try again."
 
     try:
+        # Everything that can fail (DB writes, DB reads, the AI call) is
+        # now inside ONE try/except. Previously, an exception before the
+        # AI-call step (e.g. a dropped DB connection) would propagate all
+        # the way up unhandled - python-telegram-bot would just log it
+        # and the user would get NO reply at all ("silent skip"). Now,
+        # no matter what fails or where, `reply` always ends up with
+        # something to send.
         user = get_or_create_user(db, telegram_id)
 
         db.add(Conversation(user_id=user.id, role="user", content=user_message))
@@ -114,17 +122,20 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         db.add(Conversation(user_id=user.id, role="assistant", content=reply))
         db.commit()
 
-        try:
-            safe_reply = _fix_markdown_for_telegram(reply)
-            await update.message.reply_text(safe_reply, parse_mode="Markdown")
-        except Exception:
-            # Markdown parsing failed for some other reason - send as
-            # plain text, but strip asterisks entirely so we never show
-            # raw ** or * characters to the user.
-            plain_reply = safe_reply.replace("*", "")
-            await update.message.reply_text(plain_reply)
-    finally:
-        db.close()
+    except Exception as e:
+        # Catches DB connection drops, or literally anything else that
+        # could go wrong before we had a chance to generate a reply.
+        print(f"process_message failed before a reply was ready: {e}")
+        reply = "Sorry, something went wrong on my end. Please try again in a moment."
+
+    try:
+        safe_reply = _fix_markdown_for_telegram(reply)
+        await update.message.reply_text(safe_reply, parse_mode="Markdown")
+    except Exception:
+        plain_reply = reply.replace("*", "")
+        await update.message.reply_text(plain_reply)
+
+    db.close()
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
