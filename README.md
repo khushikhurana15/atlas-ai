@@ -1,82 +1,103 @@
-# Atlas - AI Financial Assistant (Phase 1)
+# Atlas - AI Financial Assistant
 
-Ye Phase 1 hai: basic conversational Telegram bot jo Claude AI se
-baat karwata hai. Abhi memory, financial data, documents kuch bhi
-nahi hai - bas ek working bot jisse tum baat kar sako.
+A conversational AI financial assistant that lives inside Telegram. Built for the Atlas AI Financial Assistant Hackathon.
 
-## Setup Steps (line by line follow karo)
+Atlas feels less like a chatbot and more like an experienced financial analyst — it remembers context, gives live market data, reads your documents, and proactively checks in when something worth knowing happens.
 
-### 1. Telegram Bot Banao
+## What it does
 
-1. Telegram khol ke `@BotFather` ko search karo aur message karo.
-2. `/newbot` type karo.
-3. Bot ka naam aur username set karo (username `_bot` se end hona chahiye).
-4. BotFather tumhe ek **token** dega jaisa: `123456789:ABCdefGhIJKlmNoPQRstuVWXyz`
-   Ise safe rakho.
+- **Natural conversation** - no slash commands, menus, or buttons. Just talk to it.
+- **Multilingual** - replies in English, Hindi, or Hinglish, matching whatever the user just wrote.
+- **Memory** - remembers past messages and gradually learns your role and interests, without a signup form.
+- **Live financial data**
+  - Indian (NSE) stock prices, via NSE India's own data with a Yahoo Finance fallback
+  - US stock prices, via Finnhub
+  - Live Nifty 50 / Bank Nifty / Sensex index levels
+  - Recent company news headlines
+- **Multi-modal input** - text, voice notes (transcribed via Whisper), photos (analyzed via a vision model, e.g. stock chart screenshots), and PDF documents (annual reports, earnings statements, etc.)
+- **Proactive daily briefing** - checks the market and the user's watchlist every morning, and only messages them if something actually moved enough to matter. Silence over noise.
+- **Grounded, honest answers** - if live data isn't available, it says so instead of guessing. Tool calls are isolated per turn so the model can't blend unrelated context (e.g. an old image) into a new answer.
 
-### 2. Anthropic API Key Lo
+## Tech stack
 
-1. https://console.anthropic.com pe jao aur account banao.
-2. API Keys section mein jaake ek naya key generate karo.
+| Layer | Choice |
+|---|---|
+| Bot framework | `python-telegram-bot` (polling) |
+| AI | Groq (`openai/gpt-oss-120b` for chat + tool calling, `whisper-large-v3` for voice, `qwen/qwen3.6-27b` for vision) |
+| Database | PostgreSQL (Neon), via SQLAlchemy |
+| Scheduler | APScheduler |
+| Indian stock/index data | `nse` library (NSE India), with `yfinance` fallback |
+| US stock/news data | Finnhub |
+| PDF parsing | `pdfplumber` |
 
-### 3. Python Environment Setup
+## Setup
 
-Terminal mein project folder ke andar jaake ye commands chalao:
+### 1. Create a Telegram bot
+Message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`, and follow the prompts. You'll get a bot token.
 
+### 2. Get API keys
+- **Groq**: [console.groq.com](https://console.groq.com) → API Keys (free tier)
+- **Finnhub**: [finnhub.io/register](https://finnhub.io/register) (free tier)
+- **Neon (Postgres)**: [neon.tech](https://neon.tech) → create a project → copy the connection string
+
+### 3. Set up the Python environment
 ```bash
-# Virtual environment banao (isse dependencies alag rehte hain)
 python -m venv venv
-
-# Activate karo
 source venv/bin/activate      # Mac/Linux
 venv\Scripts\activate         # Windows
 
-# Dependencies install karo
 pip install -r requirements.txt
 ```
 
-### 4. Environment Variables Set Karo
+### 4. Configure environment variables
+Create a `.env` file in the project root:
+```
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+GROQ_API_KEY=your_groq_api_key
+DATABASE_URL=your_neon_connection_string
+FINNHUB_API_KEY=your_finnhub_api_key
+```
 
+### 5. Create the database tables
 ```bash
-cp .env.example .env
+python create_tables.py
+python add_profile_columns.py
 ```
 
-Ab `.env` file kholo aur apni actual keys daalo:
-
-```
-TELEGRAM_BOT_TOKEN=tumhara_telegram_token_yahan
-ANTHROPIC_API_KEY=tumhari_anthropic_key_yahan
-```
-
-### 5. Bot Chalao
-
+### 6. Run the bot
 ```bash
 python -m app.main
 ```
+Open Telegram, find your bot, and send `/start`.
 
-Terminal mein "Atlas bot chal raha hai..." dikhega. Ab Telegram khol ke
-apne bot ko dhundo aur `/start` bhejo!
-
-## Project Structure
-
+## Project structure
 ```
 atlas-assistant/
 ├── app/
-│   ├── main.py              # Bot yahan se start hota hai
-│   ├── config.py            # API keys yahan load hoti hain
+│   ├── main.py                  # Entry point - starts the bot + scheduler
+│   ├── config.py                # Loads API keys/settings from .env
+│   ├── scheduler.py             # Daily proactive market brief
 │   ├── bot/
-│   │   └── handlers.py      # Telegram messages yahan handle hote hain
-│   └── ai/
-│       └── orchestrator.py  # Claude AI ko yahan call karte hain
+│   │   └── handlers.py          # Telegram message handlers (text/voice/photo/PDF)
+│   ├── ai/
+│   │   ├── orchestrator.py      # Core AI logic + tool-calling loop
+│   │   ├── transcription.py     # Voice-to-text (Whisper)
+│   │   └── vision.py            # Image analysis
+│   ├── tools/
+│   │   ├── nse_tool.py          # Indian stock prices
+│   │   ├── finnhub_tool.py      # US stock prices
+│   │   ├── index_tool.py        # Nifty/Bank Nifty/Sensex
+│   │   ├── news_tool.py         # Company news
+│   │   ├── pdf_tool.py          # PDF text extraction
+│   │   └── profile_tool.py      # Onboarding/personalization
+│   └── db/
+│       ├── database.py          # DB connection
+│       └── models.py            # User & Conversation tables
 ├── requirements.txt
 └── .env.example
 ```
 
-## Agla Kya Aayega (Phase 2+)
+## Notes
 
-- **Database + Memory**: User profile, watchlist, conversation history save karna
-- **Financial Data**: Live stock prices, company research
-- **Documents**: PDF upload karke usse questions poochna
-- **Scheduler**: Daily market briefing automatically bhejna
-- **Google Integrations**: Gmail, Calendar connect karna
-- **Voice & Image**: Voice messages aur images samajhna
+- Google Workspace integrations (Gmail, Calendar) were deprioritized given the timeline — the task doc explicitly allows these to be skippable.
+- The `nse` library talks directly to NSE India's site and is the primary source for Indian market data; `yfinance` is used only as a silent fallback if that fails.

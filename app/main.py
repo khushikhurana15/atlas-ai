@@ -1,10 +1,19 @@
 """
 This file actually runs the bot.
 
+Render's free tier only supports "Web Services" (which must listen
+on a port), not "Background Workers" (which cost money). So we run a
+tiny HTTP server in a background thread just to satisfy that
+requirement - it doesn't do anything except respond "OK" - while the
+actual bot logic (Telegram polling) runs exactly as before.
+
 Run karne ke liye (project root se):
     python -m app.main
 """
 
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from app.config import TELEGRAM_BOT_TOKEN
 from app.bot.handlers import (
@@ -17,18 +26,30 @@ from app.bot.handlers import (
 from app.scheduler import start_scheduler
 
 
+class _HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Atlas bot is running")
+
+    def log_message(self, format, *args):
+        pass  # keep the logs clean - we don't need every ping logged
+
+
+def _run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
+    server.serve_forever()
+
+
 async def _on_startup(app):
-    # post_init runs inside the bot's own asyncio event loop, which is
-    # what AsyncIOScheduler needs - starting it any earlier (before
-    # run_polling has a loop running) would fail.
     start_scheduler(app.bot)
     print("Daily brief scheduler started.")
 
 
 def main():
-    # concurrent_updates=True means one slow/stuck message can never
-    # block other users (or other messages) from getting replies -
-    # each update is processed independently.
+    threading.Thread(target=_run_health_server, daemon=True).start()
+
     app = (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
