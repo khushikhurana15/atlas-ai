@@ -126,8 +126,12 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         # Catches DB connection drops, or literally anything else that
         # could go wrong before we had a chance to generate a reply.
         print(f"process_message failed before a reply was ready: {e}")
+        try:
+            db.rollback()  # reset the session so it's usable for the NEXT message
+        except Exception:
+            pass
         reply = "Sorry, something went wrong on my end. Please try again in a moment."
-
+        
     try:
         safe_reply = _fix_markdown_for_telegram(reply)
         await update.message.reply_text(safe_reply, parse_mode="Markdown")
