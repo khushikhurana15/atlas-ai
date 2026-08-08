@@ -15,8 +15,8 @@ from app.tools.pdf_tool import extract_pdf_text
 from app.db.database import get_db_session
 from app.db.models import User, Conversation
 
-REPLY_TIMEOUT_SECONDS = 30
-DOWNLOAD_TIMEOUT_SECONDS = 20
+REPLY_TIMEOUT_SECONDS = 50
+DOWNLOAD_TIMEOUT_SECONDS = 25
 
 
 def _fix_markdown_for_telegram(text: str) -> str:

@@ -28,7 +28,7 @@ from app.tools.profile_tool import update_user_profile
 client = OpenAI(
     api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1",
-    timeout=20.0,
+    timeout=30.0,
 )
 
 HINGLISH_WORDS = {
