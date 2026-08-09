@@ -32,6 +32,18 @@ def analyze_image(image_bytes: bytes, caption: str = "") -> str:
     )
 
     prompt += (
+        "\n\nIMPORTANT: This is the ONLY time this image will be analyzed - "
+        "any follow-up questions later in the conversation will rely "
+        "entirely on what you write now, without seeing the image again. "
+        "So: answer the question above, but ALSO list out every other "
+        "clearly-legible data point in the image (e.g. if it's a table of "
+        "stocks, list each symbol with its price/change; if it's a chart, "
+        "note the key visible values) in a few compact bullet points. "
+        "Do not skip visible data just because it wasn't directly asked "
+        "about - a later question may need it."
+    )
+
+    prompt += (
         f"\n\nToday's actual real-world date is {date.today().isoformat()} - "
         f"use this, not any assumption from your training data, if the "
         f"image or your answer involves reasoning about what year/date it "

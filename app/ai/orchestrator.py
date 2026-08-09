@@ -155,6 +155,24 @@ AVAILABLE_FUNCTIONS = {
 # mode" - a turn where the user is asking about an uploaded document.
 DOCUMENT_MARKER = "[User uploaded a PDF"
 
+# Same idea for images (see handle_photo_message). Images only get
+# analyzed once, at upload time - the description/answer generated
+# then is all the model will ever "see" of that image again. Without
+# a reminder, the model sometimes invents a plausible-sounding value
+# for something not captured in that description, instead of saying
+# it doesn't have it.
+IMAGE_MARKER = "[User sent an image]"
+
+IMAGE_MODE_INSTRUCTION = (
+    "\n\nNote: earlier in this conversation, an image was analyzed and "
+    "its content was described in the conversation history. That "
+    "description is ALL you have of that image - you cannot look at it "
+    "again. If this question asks about something from that image and "
+    "the answer isn't in the description already given, say plainly you "
+    "don't have that detail from the image - do not guess or invent a "
+    "number."
+)
+
 # Live-data tools available in every normal turn - all excluded in
 # document mode (see below).
 STOCK_TOOL_NAMES = {"get_nse_stock_price", "get_stock_quote", "get_index_level", "get_company_news"}
@@ -267,12 +285,23 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
     )
     active_tools = DOCUMENT_MODE_TOOLS if is_document_turn else TOOLS
 
+    # Image mode: was an image analyzed anywhere in this conversation?
+    # Doesn't restrict tools (a live price lookup after discussing an
+    # image is still valid) - just reminds the model not to invent
+    # details about the image beyond what was actually captured.
+    has_image_context = any(
+        m["role"] == "user" and isinstance(m.get("content"), str) and IMAGE_MARKER in m["content"]
+        for m in messages
+    )
+
     if messages[-1]["role"] == "user":
         original_text = messages[-1]["content"]
         language = detect_language(original_text)
         tag = f"\n\n[SYSTEM TAG: reply in {language}]"
         if is_document_turn:
             tag += DOCUMENT_MODE_INSTRUCTION
+        if has_image_context and not is_document_turn:
+            tag += IMAGE_MODE_INSTRUCTION
         messages[-1] = {
             "role": "user",
             "content": f"{original_text}{tag}",
