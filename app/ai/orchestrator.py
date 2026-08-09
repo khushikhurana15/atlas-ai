@@ -151,17 +151,7 @@ AVAILABLE_FUNCTIONS = {
     "update_user_profile": update_user_profile,
 }
 
-# handlers.py tags every PDF-derived message with this marker (see
-# handle_document_message). We check for it here to detect "document
-# mode" - a turn where the user is asking about an uploaded document.
 DOCUMENT_MARKER = "[User uploaded a PDF"
-
-# Same idea for images (see handle_photo_message). Images only get
-# analyzed once, at upload time - the description/answer generated
-# then is all the model will ever "see" of that image again. Without
-# a reminder, the model sometimes invents a plausible-sounding value
-# for something not captured in that description, instead of saying
-# it doesn't have it.
 IMAGE_MARKER = "[User sent an image]"
 
 IMAGE_MODE_INSTRUCTION = (
@@ -182,16 +172,13 @@ IMAGE_MODE_INSTRUCTION = (
     "anywhere else."
 )
 
-# Live-data tools available in every normal turn - all excluded in
-# document mode (see below).
 STOCK_TOOL_NAMES = {"get_nse_stock_price", "get_stock_quote", "get_index_level", "get_company_news"}
 
-# In document mode we deliberately drop the live-data tools. This is
-# the fix for the "Apple closed at $313" hallucination: the model had
-# access to get_stock_quote in the same turn as the PDF text, got
-# confused about which one to trust, and ended up inventing a number
-# instead of using either. Removing the tools removes that ambiguity -
-# the only thing left to answer from is the document text itself.
+# Only the turn where PDF text is FIRST introduced gets tools removed
+# entirely (highest-risk moment for blending document text with a
+# tool call in the same turn). Any later, unrelated question (e.g.
+# "TCS ka price?") should NOT be blocked just because a PDF was
+# uploaded earlier - it should use tools normally.
 DOCUMENT_MODE_TOOLS = [t for t in TOOLS if t["function"]["name"] not in STOCK_TOOL_NAMES]
 
 DOCUMENT_MODE_INSTRUCTION = (
@@ -203,6 +190,20 @@ DOCUMENT_MODE_INSTRUCTION = (
     "text. If the answer isn't in the document, say plainly it isn't "
     "mentioned in the document - do not guess or fill the gap. You have "
     "no live-data tools this turn; do not claim to have checked live data."
+)
+
+# Used for any LATER turn in a conversation that once had a document
+# uploaded - tools stay ON here, this just prevents the model from
+# blending document content with live-tool data for unrelated questions.
+DOCUMENT_CONTEXT_INSTRUCTION = (
+    "\n\nNote: earlier in this conversation, a document was uploaded and "
+    "its extracted text was shown then. If this question is about that "
+    "document's content, use ONLY that document text - never invent or "
+    "estimate. If this question is about something else entirely (e.g. "
+    "a different company's live price), answer it normally using your "
+    "tools as usual - do not refuse just because a document was uploaded "
+    "earlier; the document only restricts answers about the document "
+    "itself, not unrelated questions."
 )
 
 
@@ -280,29 +281,21 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
         {"role": "system", "content": profile_context},
     ] + list(conversation_history)
 
-    # Document mode: was a document uploaded anywhere in this
-    # conversation (not just the latest message)? Checking only the
-    # latest message meant a follow-up like "isme AAPL ka price kya
-    # hai" (asked one turn AFTER the PDF upload) lost the strict
-    # grounding entirely - the model regained access to live-price
-    # tools and answered with a real (but contextually misleading)
-    # live quote instead of correctly saying AAPL isn't in the
-    # document. Checking the full history keeps grounding active for
-    # every follow-up about that document, for as long as it's still
-    # in the last 10 messages of context.
-    is_document_turn = any(
-        m["role"] == "user" and DOCUMENT_MARKER in m["content"]
-        for m in messages
-        if isinstance(m.get("content"), str)
+    # Strict mode (tools OFF) only for the turn where PDF text is
+    # literally being introduced right now. Later follow-ups keep
+    # tools ON (see has_document_context / DOCUMENT_CONTEXT_INSTRUCTION).
+    latest_is_document_turn = (
+        messages[-1]["role"] == "user"
+        and isinstance(messages[-1].get("content"), str)
+        and DOCUMENT_MARKER in messages[-1]["content"]
     )
+    has_document_context = any(
+        m["role"] == "user" and isinstance(m.get("content"), str) and DOCUMENT_MARKER in m["content"]
+        for m in messages
+    )
+    is_document_turn = latest_is_document_turn
     active_tools = DOCUMENT_MODE_TOOLS if is_document_turn else TOOLS
 
-    # Image mode: was an image analyzed anywhere in this conversation?
-    # Doesn't restrict tools (a live price lookup after discussing an
-    # image is still valid) - just reminds the model not to invent
-    # details about the image beyond what was actually captured, and
-    # not to confuse an image's data with a live quote fetched at a
-    # different point in the conversation.
     has_image_context = any(
         m["role"] == "user" and isinstance(m.get("content"), str) and IMAGE_MARKER in m["content"]
         for m in messages
@@ -314,6 +307,8 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
         tag = f"\n\n[SYSTEM TAG: reply in {language}]"
         if is_document_turn:
             tag += DOCUMENT_MODE_INSTRUCTION
+        elif has_document_context:
+            tag += DOCUMENT_CONTEXT_INSTRUCTION
         if has_image_context and not is_document_turn:
             tag += IMAGE_MODE_INSTRUCTION
         messages[-1] = {
@@ -323,9 +318,6 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
 
     profile_updates = {}
     max_rounds = 5
-    # Document turns tend to involve longer, multi-part answers (several
-    # questions about one report in one message) - give them more room
-    # than a typical short chat reply needs.
     max_tokens = 1200 if is_document_turn else 700
 
     for _ in range(max_rounds):
@@ -341,10 +333,6 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
         if not ai_message.tool_calls:
             reply = (ai_message.content or "").strip()
             if not reply:
-                # The model returned nothing usable (can happen when a
-                # single message packs in many questions at once, or a
-                # response gets cut off). Never forward an empty string
-                # to Telegram - it hard-crashes the send call.
                 reply = (
                     "Ye ek saath thoda zyada ho gaya, main poora process "
                     "nahi kar paya. Ek-ek karke pooch sakte ho?"
