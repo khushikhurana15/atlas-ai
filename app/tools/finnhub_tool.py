@@ -43,4 +43,5 @@ def get_stock_quote(symbol: str) -> dict:
         "high_today": data.get("h"),
         "low_today": data.get("l"),
         "previous_close": data.get("pc"),
+        "currency": "USD",
     }

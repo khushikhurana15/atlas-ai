@@ -28,7 +28,7 @@ from app.tools.profile_tool import update_user_profile
 client = OpenAI(
     api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1",
-    timeout=30.0,
+    timeout=20.0,
 )
 
 HINGLISH_WORDS = {
@@ -218,9 +218,6 @@ Rules:
 - You're given recent conversation history - use it for context.
 - Formatting: Telegram Markdown only - single asterisk *bold* (not **),
   underscore _italic_. No tables - use bullet points (- or •).
-- CURRENCY: Every price tool result includes a "currency" field (USD or
-  INR). Always show the matching symbol - $ for USD, ₹ for INR. Never
-  default to ₹ for a US stock or $ for an Indian stock.
 """
 
 
@@ -253,13 +250,20 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
         {"role": "system", "content": profile_context},
     ] + list(conversation_history)
 
-    # Document mode: the latest user message carries PDF-extracted text
-    # (tagged by handlers.py). We detect it here so this turn gets a
-    # restricted toolset (no stock-price tools) and a stronger grounding
-    # instruction - see DOCUMENT_MODE_TOOLS/DOCUMENT_MODE_INSTRUCTION above.
-    is_document_turn = (
-        messages[-1]["role"] == "user"
-        and DOCUMENT_MARKER in messages[-1]["content"]
+    # Document mode: was a document uploaded anywhere in this
+    # conversation (not just the latest message)? Checking only the
+    # latest message meant a follow-up like "isme AAPL ka price kya
+    # hai" (asked one turn AFTER the PDF upload) lost the strict
+    # grounding entirely - the model regained access to live-price
+    # tools and answered with a real (but contextually misleading)
+    # live quote instead of correctly saying AAPL isn't in the
+    # document. Checking the full history keeps grounding active for
+    # every follow-up about that document, for as long as it's still
+    # in the last 10 messages of context.
+    is_document_turn = any(
+        m["role"] == "user" and DOCUMENT_MARKER in m["content"]
+        for m in messages
+        if isinstance(m.get("content"), str)
     )
     active_tools = DOCUMENT_MODE_TOOLS if is_document_turn else TOOLS
 
