@@ -3,10 +3,11 @@ This is the "AI orchestrator" - the brain of our assistant.
 
 It pulls conversation history and the user's known profile from the
 database, detects the language of the user's latest message, and
-supports tool calling with exactly three live-data sources:
+supports tool calling with live-data sources:
 - get_nse_stock_price - NSE India (Indian stocks)
 - get_index_level - NSE India (Nifty/Bank Nifty)
 - get_stock_quote - Finnhub (US stocks)
+- get_company_news - Finnhub (recent news)
 plus update_user_profile for onboarding/personalization.
 
 Every tool call is wrapped so a Python exception can never crash the
@@ -28,7 +29,7 @@ from app.tools.profile_tool import update_user_profile
 client = OpenAI(
     api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1",
-    timeout=20.0,
+    timeout=30.0,
 )
 
 HINGLISH_WORDS = {
@@ -164,13 +165,21 @@ DOCUMENT_MARKER = "[User uploaded a PDF"
 IMAGE_MARKER = "[User sent an image]"
 
 IMAGE_MODE_INSTRUCTION = (
-    "\n\nNote: earlier in this conversation, an image was analyzed and "
-    "its content was described in the conversation history. That "
-    "description is ALL you have of that image - you cannot look at it "
-    "again. If this question asks about something from that image and "
-    "the answer isn't in the description already given, say plainly you "
-    "don't have that detail from the image - do not guess or invent a "
-    "number."
+    "\n\nNote: earlier in this conversation, one or more images were "
+    "analyzed and described in the conversation history. Each "
+    "description is ALL you know about that specific image - you "
+    "cannot look at it again. If this question is about something in "
+    "an image, use ONLY that image's own description text to answer - "
+    "never substitute a number for the same company/topic that you "
+    "recall from elsewhere in the conversation (e.g. a live price "
+    "fetched by a tool earlier, or a different image). The same "
+    "company can appear multiple times in this conversation at "
+    "different moments and from different sources (a live quote vs. "
+    "a screenshot) - these are NOT interchangeable, even if the "
+    "company name matches. If the specific detail isn't present in "
+    "that image's own description, say plainly you don't have that "
+    "detail from the image - do not fill the gap with a number from "
+    "anywhere else."
 )
 
 # Live-data tools available in every normal turn - all excluded in
@@ -236,6 +245,9 @@ Rules:
 - You're given recent conversation history - use it for context.
 - Formatting: Telegram Markdown only - single asterisk *bold* (not **),
   underscore _italic_. No tables - use bullet points (- or •).
+- CURRENCY: Every price tool result includes a "currency" field (USD or
+  INR). Always show the matching symbol - $ for USD, ₹ for INR. Never
+  default to ₹ for a US stock or $ for an Indian stock.
 """
 
 
@@ -288,7 +300,9 @@ def get_ai_reply(conversation_history: list, user_profile: dict) -> tuple:
     # Image mode: was an image analyzed anywhere in this conversation?
     # Doesn't restrict tools (a live price lookup after discussing an
     # image is still valid) - just reminds the model not to invent
-    # details about the image beyond what was actually captured.
+    # details about the image beyond what was actually captured, and
+    # not to confuse an image's data with a live quote fetched at a
+    # different point in the conversation.
     has_image_context = any(
         m["role"] == "user" and isinstance(m.get("content"), str) and IMAGE_MARKER in m["content"]
         for m in messages
